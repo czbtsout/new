@@ -1,11 +1,12 @@
 const express = require('express');
 const axios = require('axios');
 const path = require('path');
+const XLSX = require('xlsx');
 
 const app = express();
 const PORT = 3000;
 
-app.use(express.json());
+app.use(express.json({ limit: '10mb' }));
 app.use(express.static('public'));
 
 // Константы
@@ -188,6 +189,143 @@ app.post('/api/calculate-route', (req, res) => {
     } catch (error) {
         console.error('Error calculating route:', error);
         res.status(500).json({ success: false, error: error.message });
+    }
+});
+
+// API endpoint для загрузки и парсинга Excel файла
+app.post('/api/upload-excel', (req, res) => {
+    try {
+        const { excelData } = req.body;
+        
+        if (!excelData) {
+            return res.status(400).json({ success: false, error: 'Нет данных Excel' });
+        }
+
+        // Декодирование base64 данных
+        const base64Data = excelData.split(',')[1] || excelData;
+        const buffer = Buffer.from(base64Data, 'base64');
+        
+        // Чтение Excel файла
+        const workbook = XLSX.read(buffer, { type: 'buffer' });
+        const sheetName = workbook.SheetNames[0];
+        const worksheet = workbook.Sheets[sheetName];
+        const data = XLSX.utils.sheet_to_json(worksheet, { header: 1 });
+
+        // Парсинг данных с автоматическим распознаванием колонок
+        const organizations = [];
+        let nameCol = -1;
+        let addressCol = -1;
+        let workplacesCol = -1;
+        let latCol = -1;
+        let lngCol = -1;
+
+        // Поиск заголовков в первой строке
+        if (data.length > 0) {
+            const headers = data[0].map(h => String(h).toLowerCase().trim());
+            
+            // Распознавание колонок
+            headers.forEach((header, index) => {
+                if (header.includes('организация') || header.includes('название') || header.includes('name') || header.includes('org')) {
+                    nameCol = index;
+                } else if (header.includes('адрес') || header.includes('address') || header.includes('location')) {
+                    addressCol = index;
+                } else if (header.includes('рабоч') || header.includes('workplace') || header.includes('count') || header.includes('кол')) {
+                    workplacesCol = index;
+                } else if (header.includes('шир') || header.includes('lat') || header.includes('latitude')) {
+                    latCol = index;
+                } else if (header.includes('долг') || header.includes('lng') || header.includes('lon') || header.includes('longitude')) {
+                    lngCol = index;
+                }
+            });
+        }
+
+        // Обработка строк с данными
+        for (let i = 1; i < data.length; i++) {
+            const row = data[i];
+            if (!row || row.length === 0) continue;
+
+            const name = nameCol >= 0 && row[nameCol] ? String(row[nameCol]).trim() : `Организация ${i}`;
+            const address = addressCol >= 0 && row[addressCol] ? String(row[addressCol]).trim() : '';
+            const workplaces = workplacesCol >= 0 && row[workplacesCol] ? parseInt(row[workplacesCol]) : 1;
+            const lat = latCol >= 0 && row[latCol] ? parseFloat(row[latCol]) : null;
+            const lng = lngCol >= 0 && row[lngCol] ? parseFloat(row[lngCol]) : null;
+
+            // Пропускать пустые строки
+            if (!address && !lat && !lng) continue;
+
+            organizations.push({
+                id: i,
+                name: name,
+                address: address,
+                workplaces: isNaN(workplaces) || workplaces <= 0 ? 1 : workplaces,
+                lat: lat,
+                lng: lng
+            });
+        }
+
+        if (organizations.length === 0) {
+            return res.status(400).json({ 
+                success: false, 
+                error: 'Не найдено данных об организациях. Проверьте формат файла.' 
+            });
+        }
+
+        res.json({
+            success: true,
+            organizations: organizations,
+            count: organizations.length
+        });
+    } catch (error) {
+        console.error('Error parsing Excel:', error);
+        res.status(500).json({ 
+            success: false, 
+            error: 'Ошибка при обработке Excel файла: ' + error.message 
+        });
+    }
+});
+
+// API endpoint для геокодирования адреса (используем Nominatim OpenStreetMap)
+app.post('/api/geocode', async (req, res) => {
+    try {
+        const { address } = req.body;
+        
+        if (!address) {
+            return res.status(400).json({ success: false, error: 'Адрес не указан' });
+        }
+
+        // Добавляем "Алтайский край" для лучшей точности
+        const fullAddress = `${address}, Алтайский край, Россия`;
+        const encodedAddress = encodeURIComponent(fullAddress);
+        
+        const response = await axios.get(
+            `https://nominatim.openstreetmap.org/search?format=json&q=${encodedAddress}&limit=1`,
+            {
+                headers: {
+                    'User-Agent': 'SOUT-Route-Optimizer/1.0'
+                }
+            }
+        );
+
+        if (response.data && response.data.length > 0) {
+            const result = response.data[0];
+            res.json({
+                success: true,
+                lat: parseFloat(result.lat),
+                lng: parseFloat(result.lon),
+                displayName: result.display_name
+            });
+        } else {
+            res.json({
+                success: false,
+                error: 'Адрес не найден'
+            });
+        }
+    } catch (error) {
+        console.error('Geocoding error:', error);
+        res.status(500).json({ 
+            success: false, 
+            error: 'Ошибка геокодирования: ' + error.message 
+        });
     }
 });
 

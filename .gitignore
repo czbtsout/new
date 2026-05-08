@@ -2,30 +2,45 @@
 # Dependencies
 node_modules/
 
-# Logs and temp files
-*.log
-*.tmp
+# Excel files (test data)
+*.xlsx
 
 # Environment
 .env
 .env.local
-.env.*
+*.env.*
 
-# Package lock
-package-lock.json
+# Logs
+*.log
+
+# Editor/IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+*.tmp
 
 # Build artifacts
 dist/
 build/
-target/
+*.js.map
 
-# IDE
-.vscode/
-.idea/
-
-# OS
+# OS generated files
 .DS_Store
 Thumbs.db
+
+# Coverage reports
+coverage/
+htmlcov/
+*.coverage
+
+# Python related (if any Python files exist in project)
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+.Python
+*.so
 
 # Compressed files
 *.zip
@@ -46,4 +61,8 @@ Thumbs.db
 *.Z
 *.lz
 *.lzo
+*.tar.gz
+*.tar.bz2
+*.tar.xz
+*.tar.zst
 ```

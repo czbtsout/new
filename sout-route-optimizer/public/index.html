@@ -343,17 +343,27 @@
                 </div>
 
                 <div class="form-group">
+                    <label for="excelFile">Загрузить из Excel (.xlsx, .xls)</label>
+                    <input type="file" id="excelFile" accept=".xlsx,.xls">
+                    <p class="helper-text">Файл должен содержать колонки: Организация, Адрес, Рабочие места (и опционально Широта, Долгота)</p>
+                </div>
+
+                <button onclick="uploadExcel()" style="background: linear-gradient(135deg, #11998e 0%, #38ef7d 100%); margin-bottom: 15px;">📊 Загрузить Excel файл</button>
+
+                <div class="form-group">
                     <label for="organizations">Список организаций (JSON)</label>
                     <textarea id="organizations" placeholder='[{"name": "ООО Пример", "address": "Адрес", "lat": 53.36, "lng": 83.76, "workplaces": 10}]'></textarea>
-                    <p class="helper-text">Оставьте пустым для использования默认ных организаций</p>
+                    <p class="helper-text">Оставьте пустым для использования данных по умолчанию или загрузите Excel</p>
                 </div>
 
                 <button onclick="calculateRoute()">Рассчитать маршрут</button>
 
                 <div id="loading" class="loading hidden">
                     <div class="spinner"></div>
-                    <p>Расчет оптимального маршрута...</p>
+                    <p id="loadingText">Расчет оптимального маршрута...</p>
                 </div>
+
+                <div id="orgCount" class="helper-text" style="margin-top: 15px; color: #11998e; font-weight: 600;"></div>
             </div>
 
             <div class="map-container">
@@ -609,6 +619,137 @@
         document.addEventListener('DOMContentLoaded', () => {
             initMap();
         });
+
+        // Загрузка Excel файла
+        async function uploadExcel() {
+            const fileInput = document.getElementById('excelFile');
+            const file = fileInput.files[0];
+
+            if (!file) {
+                alert('Пожалуйста, выберите Excel файл для загрузки');
+                return;
+            }
+
+            // Проверка расширения
+            const validExtensions = ['.xlsx', '.xls'];
+            const fileName = file.name.toLowerCase();
+            const hasValidExtension = validExtensions.some(ext => fileName.endsWith(ext));
+
+            if (!hasValidExtension) {
+                alert('Пожалуйста, выберите файл формата .xlsx или .xls');
+                return;
+            }
+
+            document.getElementById('loading').classList.remove('hidden');
+            document.getElementById('loadingText').textContent = 'Обработка Excel файла...';
+
+            try {
+                // Чтение файла как ArrayBuffer
+                const arrayBuffer = await readFileAsArrayBuffer(file);
+                
+                // Конвертация в base64
+                const base64 = arrayBufferToBase64(arrayBuffer);
+
+                // Отправка на сервер
+                const response = await fetch('/api/upload-excel', {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json'
+                    },
+                    body: JSON.stringify({
+                        excelData: base64
+                    })
+                });
+
+                const data = await response.json();
+
+                if (data.success) {
+                    // Отображение данных в textarea
+                    document.getElementById('organizations').value = JSON.stringify(data.organizations, null, 2);
+                    
+                    // Показываем количество загруженных организаций
+                    document.getElementById('orgCount').textContent = `✅ Загружено организаций: ${data.count}`;
+                    
+                    // Автоматическое геокодирование адресов без координат
+                    await geocodeAddresses(data.organizations);
+                } else {
+                    alert('Ошибка при обработке файла: ' + data.error);
+                }
+            } catch (error) {
+                console.error('Upload error:', error);
+                alert('Ошибка при загрузке файла: ' + error.message);
+            } finally {
+                document.getElementById('loading').classList.add('hidden');
+                document.getElementById('loadingText').textContent = 'Расчет оптимального маршрута...';
+            }
+        }
+
+        // Чтение файла как ArrayBuffer
+        function readFileAsArrayBuffer(file) {
+            return new Promise((resolve, reject) => {
+                const reader = new FileReader();
+                reader.onload = () => resolve(reader.result);
+                reader.onerror = reject;
+                reader.readAsArrayBuffer(file);
+            });
+        }
+
+        // Конвертация ArrayBuffer в base64
+        function arrayBufferToBase64(buffer) {
+            let binary = '';
+            const bytes = new Uint8Array(buffer);
+            for (let i = 0; i < bytes.byteLength; i++) {
+                binary += String.fromCharCode(bytes[i]);
+            }
+            return btoa(binary);
+        }
+
+        // Геокодирование адресов без координат
+        async function geocodeAddresses(organizations) {
+            const needGeocode = organizations.filter(org => org.lat === null || org.lng === null || !org.lat || !org.lng);
+            
+            if (needGeocode.length === 0) {
+                document.getElementById('orgCount').textContent += ` | Все адреса имеют координаты`;
+                return;
+            }
+
+            document.getElementById('loadingText').textContent = `Геокодирование адресов... (${needGeocode.length} из ${organizations.length})`;
+            
+            let geocoded = 0;
+            
+            for (const org of needGeocode) {
+                if (!org.address) continue;
+                
+                try {
+                    const response = await fetch('/api/geocode', {
+                        method: 'POST',
+                        headers: {
+                            'Content-Type': 'application/json'
+                        },
+                        body: JSON.stringify({
+                            address: org.address
+                        })
+                    });
+
+                    const data = await response.json();
+                    
+                    if (data.success) {
+                        org.lat = data.lat;
+                        org.lng = data.lng;
+                        geocoded++;
+                    }
+                } catch (error) {
+                    console.error(`Geocoding error for ${org.address}:`, error);
+                }
+                
+                // Небольшая задержка чтобы не превысить лимиты API
+                await new Promise(resolve => setTimeout(resolve, 100));
+            }
+
+            // Обновляем JSON с добавленными координатами
+            document.getElementById('organizations').value = JSON.stringify(organizations, null, 2);
+            document.getElementById('orgCount').textContent = `✅ Загружено организаций: ${organizations.length} (геокодировано: ${geocoded})`;
+        }
     </script>
 </body>
 </html>
