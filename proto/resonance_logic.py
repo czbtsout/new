@@ -11,6 +11,7 @@ class ThresholdPrototype:
             "архив": {"past": "Целые полки с документами", "present": "Груда пепла", "accessible": False}
         }
         self.current_location = "Перед обрывом"
+        self.message_log = ["Добро пожаловать в ПОРОГ.", "Используйте R для активации Резонатора."]
 
     def clear_screen(self):
         os.system('clear' if os.name == 'posix' else 'cls')
@@ -19,56 +20,65 @@ class ThresholdPrototype:
         status = "АКТИВЕН" if self.is_resonance_active else "ВЫКЛЮЧЕН"
         color = "\033[94m" if self.is_resonance_active else "\033[90m"
         reset = "\033[0m"
+        self.clear_screen()
         print(f"--- ПОРОГ | HUD ---")
         print(f"Локация: {self.current_location}")
         print(f"Энергия Резонатора: {color}[{'|' * (self.energy // 10)}{'.' * (10 - self.energy // 10)}] {self.energy}%{reset}")
         print(f"Режим Резонанса: {color}{status}{reset}")
         print("-------------------\n")
 
+        print("Логи событий:")
+        for msg in self.message_log[-3:]:
+            print(f"> {msg}")
+        print("\nОбъекты поблизости:")
+        for name, data in self.world_objects.items():
+            state = data["past"] if self.is_resonance_active else data["present"]
+            tag = "\033[92m[МОЖНО ПРОЙТИ]\033[0m" if self.is_resonance_active else "\033[91m[ЗАБЛОКИРОВАНО]\033[0m"
+            print(f"- {name.capitalize()}: {state} {tag}")
+
+        print("\nУправление:")
+        print("[R / К] - Переключить Резонатор")
+        print("[Q / Й] - Выйти из прототипа")
+
+    def add_message(self, text):
+        self.message_log.append(text)
+
     def toggle_resonance(self):
-        if self.energy > 0:
+        if self.energy > 5:
             self.is_resonance_active = not self.is_resonance_active
             if self.is_resonance_active:
-                print(">>> Резонатор активирован. Реальность искажается...")
+                self.add_message("Резонатор активирован. Видно прошлое.")
+                self.energy -= 10
             else:
-                print(">>> Резонатор выключен. Возвращение в настоящее.")
+                self.add_message("Резонатор выключен. Возврат в настоящее.")
         else:
-            print("!!! Недостаточно энергии!")
+            self.add_message("!!! Слишком мало энергии для активации.")
             self.is_resonance_active = False
 
     def run(self):
         try:
             while True:
-                self.clear_screen()
                 self.display_hud()
 
-                print("Объекты поблизости:")
-                for name, data in self.world_objects.items():
-                    state = data["past"] if self.is_resonance_active else data["present"]
-                    accessible = " [МОЖНО ПРОЙТИ]" if self.is_resonance_active else " [ЗАБЛОКИРОВАНО]"
-                    print(f"- {name.capitalize()}: {state}{accessible}")
+                choice = input("\nВыберите действие: ").lower().strip()
 
-                print("\nУправление:")
-                print("[R] - Переключить Резонатор")
-                print("[Q] - Выйти из прототипа")
-
-                choice = input("\nВыберите действие: ").lower()
-
-                if choice == 'r':
+                # Поддержка латиницы и кириллицы (R/К, Q/Й)
+                if choice in ['r', 'к', 'r/к']:
                     self.toggle_resonance()
-                    if self.is_resonance_active:
-                        self.energy -= 15
-                    time.sleep(1)
-                elif choice == 'q':
+                elif choice in ['q', 'й', 'q/й']:
                     print("Завершение сеанса...")
                     break
+                else:
+                    self.add_message(f"Неизвестная команда: '{choice}'")
 
+                # Логика изменения энергии со временем
                 if self.is_resonance_active:
-                    self.energy = max(0, self.energy - 5)
+                    self.energy = max(0, self.energy - 3)
                     if self.energy == 0:
                         self.is_resonance_active = False
+                        self.add_message("Энергия исчерпана. Резонатор отключился.")
                 else:
-                    self.energy = min(100, self.energy + 2)
+                    self.energy = min(100, self.energy + 5)
 
         except KeyboardInterrupt:
             print("\nПрототип остановлен.")
